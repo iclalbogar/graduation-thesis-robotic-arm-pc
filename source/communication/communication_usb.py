@@ -145,32 +145,43 @@ class MCXN947_USB_Comm:
                 self.endpoint_out = None
 
 if __name__ == "__main__":
-    
-    TARGET_VID = 0x1fc9
-    TARGET_PID = 0x143
-    
-    mcx = MCXN947_USB_Comm(vid=TARGET_VID, pid=TARGET_PID, timeout=2000)
-    
-    if mcx.connect():
-        try:
-            command = "Merhaba Dunya"
-            logging.info(f"Sending String: '{command}'")
-            
-            mcx.write_string(command)
-            
-            time.sleep(0.1) 
-        
-            logging.info("Waiting for string response from board...")
-            response_str = mcx.read_string(size=64)
+    import sys
 
-            if response_str:
-                logging.info(f"Board Replied: '{response_str}'")
-            else:
-                logging.info("No text response received from board.")
-                
-        except KeyboardInterrupt:
-            logging.info("Interrupted by user.")
-        finally:
-            mcx.disconnect()
-    else:
+    _source_dir = os.path.dirname(current_dir)
+    if _source_dir not in sys.path:
+        sys.path.insert(0, _source_dir)
+
+    from security.session import SecureSession, SessionError
+
+    TARGET_VID = 0x1FC9
+    TARGET_PID = 0xA2
+
+    mcx = MCXN947_USB_Comm(vid=TARGET_VID, pid=TARGET_PID, timeout=2000)
+
+    if not mcx.connect():
         logging.error("Connection canceled.")
+        sys.exit(1)
+
+    session = SecureSession(mcx)
+    try:
+        logging.info("Starting ECDH P-256 handshake...")
+        session.handshake()
+        logging.info("Secure channel established (AES-256-CBC + AES-CMAC).")
+
+        plaintext = b"hello from PC"
+        logging.info(f"Sending encrypted: {plaintext!r}")
+        session.send(plaintext)
+
+        reply = session.recv()
+        logging.info(f"Board replied (decrypted): {reply!r}")
+
+    except SessionError as e:
+        logging.error(f"Session error: {e}")
+    except KeyboardInterrupt:
+        logging.info("Interrupted by user.")
+    finally:
+        try:
+            session.close()
+        except Exception:
+            pass
+        mcx.disconnect()
